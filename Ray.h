@@ -27,4 +27,9 @@ public:
     Vec3 point_at(float t) const { return m_origin + t*m_direction; }
 };
 
+inline std::ostream &operator<<(std::ostream &os, const Ray &ray) {
+    os << "(" << ray.origin() << ")-(" << ray.direction() << ")";
+    return os;
+}
+
 #endif // RAY_H

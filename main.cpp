@@ -14,6 +14,7 @@
 #include <float.h>
 #include <thread>
 #include <vector>
+#include <limits>
 #include <unistd.h>
 #include "Ray.h"
 
@@ -23,10 +24,11 @@
 
 #include "stb_image_write.h"
 
-static const int WIDTH = 3300/10;
-static const int HEIGHT = 3300/10; // 4200
+static const int WIDTH = 3300/5;
+static const int HEIGHT = 3300/5; // 4200
 static const int PIXEL_COUNT = WIDTH*HEIGHT;
 static const float PRISM_WIDTH = 0.3;
+static const float MIN_HIT_DIST = 0.001;
 
 // Whether to quit the program.
 static bool g_quit;
@@ -111,7 +113,7 @@ float intersect_with_prism_side(Ray const &ray,
 
     float t = -(p.dot(n)) / denom;
 
-    if (t > 0) {
+    if (t > MIN_HIT_DIST) {
         // See if we're actually on side.
         p = ray.point_at(t);
 
@@ -138,6 +140,8 @@ float intersect_with_prism_side(Ray const &ray,
                 }
             }
         }
+    } else {
+        t = -1;
     }
 
     return t;
@@ -155,6 +159,55 @@ void plot_point(float *image, Vec3 const &p) {
         image[i + 0] = 1;
         image[i + 1] = 1;
         image[i + 2] = 1;
+    }
+}
+
+// Approximate reflection coefficient.
+static float schlick(float cosine, float refraction_index) {
+    float r0 = (1 - refraction_index) / (1 + refraction_index);
+    r0 *= r0;
+    return r0 + (1 - r0)*pow(1 - cosine, 5);
+}
+
+void hit_glass(Ray const &ray_in, Vec3 const &p, Vec3 const &n,
+        float refraction_index, Ray &ray_out) {
+
+    // Our ray's direction, normalized.
+    Vec3 dir = ray_in.direction().unit();
+
+    // We don't know whether we're inside the material or outside.
+    // Our hit normal will always point outward. We want a normal
+    // that points in the direction we came from.
+    Vec3 normal;
+    float ni_over_nt;
+    float cosine;
+    if (dir.dot(n) > 0) {
+        // We're inside. Reverse normal.
+        normal = -n;
+        ni_over_nt = refraction_index;
+        cosine = refraction_index*dir.dot(n);
+    } else {
+        // We're outside. Use normal as-is.
+        normal = n;
+        ni_over_nt = 1/refraction_index;
+        cosine = -dir.dot(n);
+    }
+
+    Vec3 refracted;
+    if (refract(dir, normal, ni_over_nt, refracted)) {
+        // We can refract. Figure out if we should.
+        float reflection_probability = schlick(cosine, refraction_index);
+
+        if (my_rand() < reflection_probability) {
+            Vec3 reflected = reflect(dir, n);
+            ray_out = Ray(p, reflected, ray_in.wavelength());
+        } else {
+            ray_out = Ray(p, refracted, ray_in.wavelength());
+        }
+    } else {
+        // Can't refract. Only reflect.
+        Vec3 reflected = reflect(dir, n);
+        ray_out = Ray(p, reflected, ray_in.wavelength());
     }
 }
 
@@ -177,58 +230,106 @@ void render_image(float *image, int seed) {
     plot_point(image, p2);
 
     while (!g_quit) {
+        /// std::cout << "--------------------\n";
         // Random ray from light source, through slit.
         Vec3 ray_origin = Vec3(-10, -2, 1);
         Vec3 ray_target = Vec3(-0.6, my_rand()*0.01, my_rand());
         int wavelength = (int) (380 + (700 - 380)*my_rand());
         // ray_target = Vec3(-0.6, (wavelength - 380)/(700 - 380.0) - 0.5, my_rand());
-        Ray ray(ray_origin, ray_target - ray_origin, wavelength);
+        Ray ray(ray_origin, (ray_target - ray_origin).unit(), wavelength);
 
-        // Intersect with prism.
-        bool hit_prism = false;
-        float t = intersect_with_prism_side(ray, p0, p1, n01);
-        if (t >= 0) {
-            Vec3 p = ray.point_at(t);
-            if (p.z() > 0) {
-                hit_prism = true;
+        bool done_with_ray = false;
+        while (!done_with_ray) {
+            // Intersect distance.
+            float best_t = std::numeric_limits<float>::max();
+            Vec3 best_p;
+            Vec3 best_n;
+            int best_obj = -1; // 0-2 = prism, 3 = floor.
+
+            // Intersect with prism.
+            float t = intersect_with_prism_side(ray, p0, p1, n01);
+            if (t > MIN_HIT_DIST && t < best_t) {
+                Vec3 p = ray.point_at(t);
+                if (p.z() > 0) {
+                    best_t = t;
+                    best_p = p;
+                    best_n = n01;
+                    best_obj = 0;
+                }
             }
-        }
 
-        t = intersect_with_prism_side(ray, p1, p2, n12);
-        if (t >= 0) {
-            Vec3 p = ray.point_at(t);
-            if (p.z() > 0) {
-                hit_prism = true;
+            t = intersect_with_prism_side(ray, p1, p2, n12);
+            if (t > MIN_HIT_DIST && t < best_t) {
+                Vec3 p = ray.point_at(t);
+                if (p.z() > 0) {
+                    best_t = t;
+                    best_p = p;
+                    best_n = n12;
+                    best_obj = 1;
+                }
             }
-        }
 
-        t = intersect_with_prism_side(ray, p2, p0, n20);
-        if (t >= 0) {
-            Vec3 p = ray.point_at(t);
-            if (p.z() > 0) {
-                hit_prism = true;
+            t = intersect_with_prism_side(ray, p2, p0, n20);
+            if (t > MIN_HIT_DIST && t < best_t) {
+                Vec3 p = ray.point_at(t);
+                if (p.z() > 0) {
+                    best_t = t;
+                    best_p = p;
+                    best_n = n20;
+                    best_obj = 2;
+                }
             }
-        }
 
-        // Intersect with ground plane.
-        float dz = ray.m_direction.z();
-        if (!hit_prism && dz != 0) {
-            float t = -ray.m_origin.z()/dz;
+            // Intersect with ground plane.
+            float dz = ray.m_direction.z();
+            if (dz != 0) {
+                t = -ray.m_origin.z()/dz;
 
-            Vec3 p = ray.point_at(t);
-            p = (p + Vec3(0.5, 0.5, 0))*WIDTH;
+                if (t > MIN_HIT_DIST && t < best_t) {
+                    Vec3 p = ray.point_at(t);
 
-            int x = (int) (p.x() + 0.5);
-            int y = HEIGHT - 1 - (int) (p.y() + 0.5);
+                    best_t = t;
+                    best_p = p;
+                    best_n = Vec3(0, 0, 1);
+                    best_obj = 3;
+                }
+            }
 
-            if (x >= 0 && y >= 0 && x < WIDTH && y < HEIGHT) {
-                float rgb[3];
-                wavelength_to_rgb(ray.wavelength(), rgb);
+            switch (best_obj) {
+                case -1:
+                    // Didn't intersect anything.
+                    done_with_ray = true;
+                    break;
 
-                int i = (y*WIDTH + x)*3;
-                image[i + 0] += rgb[0]*0.001;
-                image[i + 1] += rgb[1]*0.001;
-                image[i + 2] += rgb[2]*0.001;
+                case 0:
+                case 1:
+                case 2: {
+                            Ray ray_out;
+                            hit_glass(ray, best_p, best_n, 1.5, ray_out);
+                            ray = ray_out;
+                            /// std::cout << ray << "\n";
+                            break;
+                        }
+
+                case 3: {
+                            // Landed on paper, leave a spot.
+                            Vec3 p = (best_p + Vec3(0.5, 0.5, 0))*WIDTH;
+
+                            int x = (int) (p.x() + 0.5);
+                            int y = HEIGHT - 1 - (int) (p.y() + 0.5);
+
+                            if (x >= 0 && y >= 0 && x < WIDTH && y < HEIGHT) {
+                                float rgb[3];
+                                wavelength_to_rgb(ray.wavelength(), rgb);
+
+                                int i = (y*WIDTH + x)*3;
+                                image[i + 0] += rgb[0]*0.01;
+                                image[i + 1] += rgb[1]*0.01;
+                                image[i + 2] += rgb[2]*0.01;
+                            }
+                            done_with_ray = true;
+                            break;
+                        }
             }
         }
     }
