@@ -26,6 +26,7 @@
 static const int WIDTH = 3300/10;
 static const int HEIGHT = 3300/10; // 4200
 static const int PIXEL_COUNT = WIDTH*HEIGHT;
+static const float PRISM_WIDTH = 0.3;
 
 // Whether to quit the program.
 static bool g_quit;
@@ -91,9 +92,60 @@ void wavelength_to_rgb(int wavelength, float rgb[3]) {
     rgb[2] = blue*factor;
 }
 
+// Normalized 2D normal vector to two vertices.
+Vec3 get_2d_normal(Vec3 const &p1, Vec3 const &p2) {
+    Vec3 v = p2 - p1;
+
+    return Vec3(-v.y(), v.x(), 0).unit();
+}
+
+float intersect_with_prism_side(Ray const &ray,
+        Vec3 const &p1, Vec3 const &p2, Vec3 const &n) {
+
+    Vec3 p = ray.origin() - p1;
+
+    float denom = ray.direction().dot(n);
+    if (denom == 0) {
+        return -1;
+    }
+
+    float t = -(p.dot(n)) / denom;
+
+    return t;
+}
+
+void plot_point(float *image, Vec3 const &p) {
+    Vec3 pi = (p + Vec3(0.5, 0.5, 0))*WIDTH;
+
+    int x = (int) (pi.x() + 0.5);
+    int y = HEIGHT - 1 - (int) (pi.y() + 0.5);
+
+    // std::cout << x << ", " << y << "\n";
+    if (x >= 0 && y >= 0 && x < WIDTH && y < HEIGHT) {
+        int i = (y*WIDTH + x)*3;
+        image[i + 0] = 1;
+        image[i + 1] = 1;
+        image[i + 2] = 1;
+    }
+}
+
 void render_image(float *image, int seed) {
     // Initialize the seed for our thread.
     init_rand(seed);
+
+    // 2D vertices of prism, clockwise from lower-left.
+    Vec3 p0(-PRISM_WIDTH/2, 0, 0);
+    Vec3 p1(0, PRISM_WIDTH*sqrt(3)/2, 0);
+    Vec3 p2(PRISM_WIDTH/2, 0, 0);
+
+    // 2D normals of prism, clockwise from left face.
+    Vec3 n01 = get_2d_normal(p0, p1);
+    Vec3 n12 = get_2d_normal(p1, p2);
+    Vec3 n20 = get_2d_normal(p2, p0);
+
+    plot_point(image, p0);
+    plot_point(image, p1);
+    plot_point(image, p2);
 
     while (!g_quit) {
         // Random ray from light source, through slit.
@@ -102,9 +154,20 @@ void render_image(float *image, int seed) {
         int wavelength = (int) (380 + (700 - 380)*my_rand());
         Ray ray(ray_origin, ray_target - ray_origin, wavelength);
 
+        // Intersect with prism.
+        bool hit_prism = false;
+        float t = intersect_with_prism_side(ray, p0, p1, n01);
+        if (t >= 0) {
+            Vec3 p = ray.point_at(t);
+            plot_point(image, p);
+            if (p.z() > 0) {
+                hit_prism = true;
+            }
+        }
+
         // Intersect with ground plane.
         float dz = ray.m_direction.z();
-        if (dz != 0) {
+        if (!hit_prism && dz != 0) {
             float t = -ray.m_origin.z()/dz;
 
             Vec3 p = ray.point_at(t);
