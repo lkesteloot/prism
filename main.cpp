@@ -111,6 +111,35 @@ float intersect_with_prism_side(Ray const &ray,
 
     float t = -(p.dot(n)) / denom;
 
+    if (t > 0) {
+        // See if we're actually on side.
+        p = ray.point_at(t);
+
+        if (fabs(n.x()) > fabs(n.y())) {
+            // Vertical side. Project to Y axis.
+            if (p1.y() < p2.y()) {
+                if (p.y() < p1.y() || p.y() > p2.y()) {
+                    return -1;
+                }
+            } else {
+                if (p.y() < p2.y() || p.y() > p1.y()) {
+                    return -1;
+                }
+            }
+        } else {
+            // Horizontal side. Project to X axis.
+            if (p1.x() < p2.x()) {
+                if (p.x() < p1.x() || p.x() > p2.x()) {
+                    return -1;
+                }
+            } else {
+                if (p.x() < p2.x() || p.x() > p1.x()) {
+                    return -1;
+                }
+            }
+        }
+    }
+
     return t;
 }
 
@@ -152,6 +181,7 @@ void render_image(float *image, int seed) {
         Vec3 ray_origin = Vec3(-10, -2, 1);
         Vec3 ray_target = Vec3(-0.6, my_rand()*0.01, my_rand());
         int wavelength = (int) (380 + (700 - 380)*my_rand());
+        // ray_target = Vec3(-0.6, (wavelength - 380)/(700 - 380.0) - 0.5, my_rand());
         Ray ray(ray_origin, ray_target - ray_origin, wavelength);
 
         // Intersect with prism.
@@ -159,7 +189,22 @@ void render_image(float *image, int seed) {
         float t = intersect_with_prism_side(ray, p0, p1, n01);
         if (t >= 0) {
             Vec3 p = ray.point_at(t);
-            plot_point(image, p);
+            if (p.z() > 0) {
+                hit_prism = true;
+            }
+        }
+
+        t = intersect_with_prism_side(ray, p1, p2, n12);
+        if (t >= 0) {
+            Vec3 p = ray.point_at(t);
+            if (p.z() > 0) {
+                hit_prism = true;
+            }
+        }
+
+        t = intersect_with_prism_side(ray, p2, p0, n20);
+        if (t >= 0) {
+            Vec3 p = ray.point_at(t);
             if (p.z() > 0) {
                 hit_prism = true;
             }
