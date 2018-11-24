@@ -42,7 +42,7 @@ void render_image(float *image, int seed) {
 
     while (!g_quit) {
         // Random ray from light source, through slit.
-        Vec3 ray_origin = Vec3(-10, -3, 1);
+        Vec3 ray_origin = Vec3(-10, -2, 1);
         Vec3 ray_target = Vec3(-0.6, my_rand()*0.01, my_rand());
         Ray ray(ray_origin, ray_target - ray_origin);
 
@@ -59,9 +59,9 @@ void render_image(float *image, int seed) {
 
             if (x >= 0 && y >= 0 && x < WIDTH && y < HEIGHT) {
                 int i = (y*WIDTH + x)*3;
-                image[i + 0] += 0.1;
-                image[i + 1] += 0.1;
-                image[i + 2] += 0.1;
+                image[i + 0] += 0.10;
+                image[i + 1] += 0.10;
+                image[i + 2] += 0.00;
             }
         }
     }
@@ -74,8 +74,8 @@ void render_frame() {
     float *image = new float[PIXEL_COUNT*3];
 
 #ifdef DISPLAY
-    // For display, need RGBA.
-    unsigned char *rgba_image = new unsigned char[PIXEL_COUNT*4];
+    // For display.
+    uint32_t *image32 = new uint32_t[PIXEL_COUNT];
 #endif
 
     g_quit = false;
@@ -94,20 +94,18 @@ void render_frame() {
 
 #ifdef DISPLAY
     while (g_working > 0) {
-        // Convert from RGBA to RGB.
+        // Convert from float to 32-bit integer.
         float *rgbf = image;
-        unsigned char *rgba = rgba_image;
         for (int i = 0; i < PIXEL_COUNT; i++) {
-            rgba[0] = (unsigned char) rgbf[0];
-            rgba[1] = (unsigned char) rgbf[1];
-            rgba[2] = (unsigned char) rgbf[2];
-            rgba[3] = 0xFF;
+            image32[i] = MFB_RGB(
+                    (unsigned char) rgbf[0],
+                    (unsigned char) rgbf[1],
+                    (unsigned char) rgbf[2]);
 
             rgbf += 3;
-            rgba += 4;
         }
 
-        int state = mfb_update(rgba_image);
+        int state = mfb_update(image32);
         if (state < 0) {
             // Tell workers to quit.
             g_quit = true;
