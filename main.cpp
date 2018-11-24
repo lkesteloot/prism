@@ -232,8 +232,8 @@ void render_image(float *image, int seed) {
     while (!g_quit) {
         /// std::cout << "--------------------\n";
         // Random ray from light source, through slit.
-        Vec3 ray_origin = Vec3(-10, -2, 1);
-        Vec3 ray_target = Vec3(-0.6, my_rand()*0.01, my_rand());
+        Vec3 ray_origin = Vec3(-10, -4.1, 1);
+        Vec3 ray_target = Vec3(-0.6, my_rand()*0.001 - 0.1, my_rand());
         int wavelength = (int) (380 + (700 - 380)*my_rand());
         // ray_target = Vec3(-0.6, (wavelength - 380)/(700 - 380.0) - 0.5, my_rand());
         Ray ray(ray_origin, (ray_target - ray_origin).unit(), wavelength);
@@ -304,8 +304,14 @@ void render_image(float *image, int seed) {
                 case 0:
                 case 1:
                 case 2: {
+                            // Compute index of refraction for wavelength.
+                            float B = 1.5046;
+                            float C = 0.00420;
+                            float wl_um = ray.wavelength()/1000.0;
+                            float refraction_index = B + C/(wl_um*wl_um);
+
                             Ray ray_out;
-                            hit_glass(ray, best_p, best_n, 1.5, ray_out);
+                            hit_glass(ray, best_p, best_n, refraction_index, ray_out);
                             ray = ray_out;
                             /// std::cout << ray << "\n";
                             break;
@@ -323,9 +329,9 @@ void render_image(float *image, int seed) {
                                 wavelength_to_rgb(ray.wavelength(), rgb);
 
                                 int i = (y*WIDTH + x)*3;
-                                image[i + 0] += rgb[0]*0.01;
-                                image[i + 1] += rgb[1]*0.01;
-                                image[i + 2] += rgb[2]*0.01;
+                                image[i + 0] += rgb[0]*0.001;
+                                image[i + 1] += rgb[1]*0.001;
+                                image[i + 2] += rgb[2]*0.001;
                             }
                             done_with_ray = true;
                             break;
