@@ -36,6 +36,61 @@ static int g_thread_count;
 // How many worker threads are still working.
 static std::atomic_int g_working;
 
+/**
+ * Given a wavelength in nanometers, returns RGB value between 0 and 1.
+ *
+ * From: https://www.johndcook.com/wavelength_to_RGB.html
+ */
+void wavelength_to_rgb(int wavelength, float rgb[3]) {
+    float red, green, blue;
+
+    if (wavelength >= 380 && wavelength < 440) {
+        red   = -(wavelength - 440) / (440 - 380.);
+        green = 0.0;
+        blue  = 1.0;
+    } else if (wavelength >= 440 && wavelength < 490) {
+        red   = 0.0;
+        green = (wavelength - 440) / (490 - 440.);
+        blue  = 1.0;
+    } else if (wavelength >= 490 && wavelength < 510) {
+        red   = 0.0;
+        green = 1.0;
+        blue  = -(wavelength - 510) / (510 - 490.);
+    } else if (wavelength >= 510 && wavelength < 580) {
+        red   = (wavelength - 510) / (580 - 510.);
+        green = 1.0;
+        blue  = 0.0;
+    } else if (wavelength >= 580 && wavelength < 645) {
+        red   = 1.0;
+        green = -(wavelength - 645) / (645 - 580.);
+        blue  = 0.0;
+    } else if (wavelength >= 645 && wavelength < 781) {
+        red   = 1.0;
+        green = 0.0;
+        blue  = 0.0;
+    } else {
+        red   = 0.0;
+        green = 0.0;
+        blue  = 0.0;
+    }
+
+    // Let the intensity fall off near the vision limits.
+    float factor;
+    if (wavelength >= 380 && wavelength < 420) {
+        factor = 0.3 + 0.7*(wavelength - 380) / (420 - 380.);
+    } else if (wavelength >= 420 && wavelength < 701) {
+        factor = 1.0;
+    } else if (wavelength >= 701 && wavelength < 781) {
+        factor = 0.3 + 0.7*(780 - wavelength) / (780 - 700.);
+    } else {
+        factor = 0.0;
+    }
+
+    rgb[0] = red*factor;
+    rgb[1] = green*factor;
+    rgb[2] = blue*factor;
+}
+
 void render_image(float *image, int seed) {
     // Initialize the seed for our thread.
     init_rand(seed);
@@ -44,7 +99,8 @@ void render_image(float *image, int seed) {
         // Random ray from light source, through slit.
         Vec3 ray_origin = Vec3(-10, -2, 1);
         Vec3 ray_target = Vec3(-0.6, my_rand()*0.01, my_rand());
-        Ray ray(ray_origin, ray_target - ray_origin);
+        int wavelength = (int) (380 + (700 - 380)*my_rand());
+        Ray ray(ray_origin, ray_target - ray_origin, wavelength);
 
         // Intersect with ground plane.
         float dz = ray.m_direction.z();
@@ -58,10 +114,13 @@ void render_image(float *image, int seed) {
             int y = HEIGHT - 1 - (int) (p.y() + 0.5);
 
             if (x >= 0 && y >= 0 && x < WIDTH && y < HEIGHT) {
+                float rgb[3];
+                wavelength_to_rgb(ray.wavelength(), rgb);
+
                 int i = (y*WIDTH + x)*3;
-                image[i + 0] += 0.10;
-                image[i + 1] += 0.10;
-                image[i + 2] += 0.00;
+                image[i + 0] += rgb[0]*0.001;
+                image[i + 1] += rgb[1]*0.001;
+                image[i + 2] += rgb[2]*0.001;
             }
         }
     }
@@ -97,10 +156,16 @@ void render_frame() {
         // Convert from float to 32-bit integer.
         float *rgbf = image;
         for (int i = 0; i < PIXEL_COUNT; i++) {
+            float gamma = 0.80;
+            // Avoid negative base.
+            float red = rgbf[0] > 0 ? 255*pow(rgbf[0], gamma) : 0;
+            float green = rgbf[1] > 0 ? 255*pow(rgbf[1], gamma) : 0;
+            float blue = rgbf[2] > 0 ? 255*pow(rgbf[2], gamma) : 0; 
+
             image32[i] = MFB_RGB(
-                    (unsigned char) rgbf[0],
-                    (unsigned char) rgbf[1],
-                    (unsigned char) rgbf[2]);
+                    (unsigned char) red,
+                    (unsigned char) green,
+                    (unsigned char) blue);
 
             rgbf += 3;
         }
@@ -127,7 +192,7 @@ void usage() {
     std::cerr << "Usage: prism\n";
 }
 
-int main(int argc, char *argv[]) {
+int main() {
 #ifdef DISPLAY
     if (!mfb_open("ray", WIDTH, HEIGHT)) {
         std::cerr << "Failed to open the display.\n";
