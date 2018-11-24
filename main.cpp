@@ -6,7 +6,8 @@
 // Width of image is 1 (from -0.5 to 0.5).
 // Height of image depends on output image file size.
 // Prism is 2 units high (in positive Z direction).
-// Prism is 0.5 units wide at its base and 0.87 units high.
+// Prism is 0.3 units wide at its base.
+// Prism's base is centered at 0,0.
 // Single light source at -10, -10, 1.
 
 #include <iostream>
@@ -23,10 +24,7 @@
 #include "stb_image_write.h"
 
 static const int WIDTH = 3300/10;
-static const int HEIGHT = 4200/10;
-static const int BYTES_PER_PIXEL = 4;
-static const int STRIDE = WIDTH*BYTES_PER_PIXEL;
-static const int BYTE_COUNT = STRIDE*HEIGHT;
+static const int HEIGHT = 3300/10; // 4200
 static const int PIXEL_COUNT = WIDTH*HEIGHT;
 
 // Whether to quit the program.
@@ -38,14 +36,14 @@ static int g_thread_count;
 // How many worker threads are still working.
 static std::atomic_int g_working;
 
-void render_image(unsigned char *image, int seed) {
+void render_image(float *image, int seed) {
     // Initialize the seed for our thread.
     init_rand(seed);
 
     while (!g_quit) {
         // Random ray from light source, through slit.
-        Vec3 ray_origin = Vec3(-10, -10, 1);
-        Vec3 ray_target = Vec3(-0.6, my_rand()*0.1, my_rand());
+        Vec3 ray_origin = Vec3(-10, -3, 1);
+        Vec3 ray_target = Vec3(-0.6, my_rand()*0.01, my_rand());
         Ray ray(ray_origin, ray_target - ray_origin);
 
         // Intersect with ground plane.
@@ -60,14 +58,10 @@ void render_image(unsigned char *image, int seed) {
             int y = HEIGHT - 1 - (int) (p.y() + 0.5);
 
             if (x >= 0 && y >= 0 && x < WIDTH && y < HEIGHT) {
-                int i = y*STRIDE + x*BYTES_PER_PIXEL;
-                image[i] = std::min(image[i] + 1, 0xFF);
-                i++;
-                image[i] = std::min(image[i] + 1, 0xFF);
-                i++;
-                image[i] = std::min(image[i] + 1, 0xFF);
-                i++;
-                image[i++] = 0xFF;
+                int i = (y*WIDTH + x)*3;
+                image[i + 0] += 0.1;
+                image[i + 1] += 0.1;
+                image[i + 2] += 0.1;
             }
         }
     }
@@ -77,7 +71,12 @@ void render_image(unsigned char *image, int seed) {
 }
 
 void render_frame() {
-    unsigned char *image = new unsigned char[BYTE_COUNT];
+    float *image = new float[PIXEL_COUNT*3];
+
+#ifdef DISPLAY
+    // For display, need RGBA.
+    unsigned char *rgba_image = new unsigned char[PIXEL_COUNT*4];
+#endif
 
     g_quit = false;
 
@@ -95,7 +94,20 @@ void render_frame() {
 
 #ifdef DISPLAY
     while (g_working > 0) {
-        int state = mfb_update(image);
+        // Convert from RGBA to RGB.
+        float *rgbf = image;
+        unsigned char *rgba = rgba_image;
+        for (int i = 0; i < PIXEL_COUNT; i++) {
+            rgba[0] = (unsigned char) rgbf[0];
+            rgba[1] = (unsigned char) rgbf[1];
+            rgba[2] = (unsigned char) rgbf[2];
+            rgba[3] = 0xFF;
+
+            rgbf += 3;
+            rgba += 4;
+        }
+
+        int state = mfb_update(rgba_image);
         if (state < 0) {
             // Tell workers to quit.
             g_quit = true;
@@ -110,29 +122,6 @@ void render_frame() {
         thread[t]->join();
         delete thread[t];
         thread[t] = 0;
-    }
-
-    // Save the image if we weren't interrupted by the user.
-    if (!g_quit) {
-        // Convert from RGBA to RGB.
-        const int RGB_BYTE_COUNT = PIXEL_COUNT*3;
-        unsigned char *rgb_image = new unsigned char[RGB_BYTE_COUNT];
-        unsigned char *rgba = image;
-        unsigned char *rgb = rgb_image;
-        for (int i = 0; i < PIXEL_COUNT; i++) {
-            rgb[0] = rgba[2];
-            rgb[1] = rgba[1];
-            rgb[2] = rgba[0];
-
-            rgba += 4;
-            rgb += 3;
-        }
-
-        // Write image.
-        int success = stbi_write_png("out.png", WIDTH, HEIGHT, 3, rgb_image, WIDTH*3);
-        if (!success) {
-            std::cerr << "Cannot write output image.\n";
-        }
     }
 }
 
