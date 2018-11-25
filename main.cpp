@@ -271,7 +271,7 @@ void render_image(float *image, int seed) {
         ray_origin += offset;
         ray_target += offset;
 
-        if (my_rand() < 0.1) {
+        if (my_rand() < 0.10) {
             Vec3 p_avg = (p0 + p1 + p2)/3;
             ray_origin = p_avg + Vec3((my_rand() - 0.5)*0.1, (my_rand() - 0.5)*0.1, 10);
             ray_target = p_avg + Vec3(my_rand() - 0.5, my_rand() - 0.5, 0);
@@ -407,7 +407,7 @@ void save_image(float *image, int file_counter) {
 
     // Write image.
     std::ostringstream final_pathname;
-    final_pathname << "out" << "-" << std::setfill('0') <<
+    final_pathname << "out4" << "-" << std::setfill('0') <<
         std::setw(3) << file_counter << ".png";
 
     std::cout << "Saving to " << final_pathname.str() << "\n";
@@ -419,8 +419,6 @@ void save_image(float *image, int file_counter) {
 }
 
 void render_frame() {
-    float *image = new float[PIXEL_COUNT*3];
-
 #ifdef DISPLAY
     // For display.
     float *image_norm = new float[PIXEL_COUNT*3];
@@ -429,15 +427,17 @@ void render_frame() {
 
     g_quit = false;
 
-    // g_thread_count = std::thread::hardware_concurrency();
-    g_thread_count = 1;
+    g_thread_count = std::thread::hardware_concurrency();
     std::cout << "Using " << g_thread_count << " threads.\n";
 
     g_working = g_thread_count;
 
     // Generate the image on multiple threads.
+    std::vector<float *> images;
     std::vector<std::thread *> thread;
     for (int t = 0; t < g_thread_count; t++) {
+        float *image = new float[PIXEL_COUNT*3];
+        images.push_back(image);
         thread.push_back(new std::thread(render_image, image, random()));
     }
 
@@ -447,22 +447,32 @@ void render_frame() {
 
     while (g_working > 0) {
         // Take log of color.
-        float *rgbf = image;
         float *rgbt = image_norm;
         float max = 0;
         for (int i = 0; i < PIXEL_COUNT; i++) {
-            rgbt[0] = log(rgbf[0] + 1);
-            rgbt[1] = log(rgbf[1] + 1);
-            rgbt[2] = log(rgbf[2] + 1);
+            // Add one because log(1) = 0.
+            rgbt[0] = 1;
+            rgbt[1] = 1;
+            rgbt[2] = 1;
+
+            // Add all images.
+            for (int j = 0; j < g_thread_count; j++) {
+                rgbt[0] += images[j][i*3 + 0];
+                rgbt[1] += images[j][i*3 + 1];
+                rgbt[2] += images[j][i*3 + 2];
+            }
+
+            rgbt[0] = log(rgbt[0]);
+            rgbt[1] = log(rgbt[1]);
+            rgbt[2] = log(rgbt[2]);
 
             max = std::max(std::max(std::max(max, rgbt[0]), rgbt[1]), rgbt[2]);
 
-            rgbf += 3;
             rgbt += 3;
         }
 
         // Convert from float to 32-bit integer.
-        rgbf = image_norm;
+        float *rgbf = image_norm;
         for (int i = 0; i < PIXEL_COUNT; i++) {
             // Avoid negative base.
             rgbf[0] = rgbf[0] > 0 ? 255*pow(rgbf[0]/max, GAMMA) : 0;
@@ -497,7 +507,7 @@ void render_frame() {
             std::chrono::steady_clock::duration time_span = now - start_time;
             double seconds = double(time_span.count())*std::chrono::steady_clock::period::num/
                 std::chrono::steady_clock::period::den;
-            if (seconds > 10 /*60*10*/) {
+            if (seconds > 60) {
                 save_image(image_norm, file_counter++);
                 start_time = std::chrono::steady_clock::now();
             }
@@ -509,7 +519,10 @@ void render_frame() {
     for (int t = 0; t < g_thread_count; t++) {
         thread[t]->join();
         delete thread[t];
-        thread[t] = 0;
+        thread[t] = nullptr;
+
+        delete images[t];
+        images[t] = nullptr;
     }
 }
 
