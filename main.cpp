@@ -11,10 +11,13 @@
 // Single light source at -10, -10, 1.
 
 #include <iostream>
+#include <sstream>
+#include <iomanip>
 #include <float.h>
 #include <thread>
 #include <vector>
 #include <limits>
+#include <chrono>
 #include <unistd.h>
 #include "Ray.h"
 
@@ -24,11 +27,15 @@
 
 #include "stb_image_write.h"
 
-static const int WIDTH = 3300/5;
-static const int HEIGHT = 3300/5; // 4200
+#undef UPDATE_DISPLAY
+
+static const int WIDTH = 3300;
+static const int HEIGHT = 4200;
 static const int PIXEL_COUNT = WIDTH*HEIGHT;
 static const float PRISM_WIDTH = 0.3;
 static const float MIN_HIT_DIST = 0.001;
+static const float GAMMA = 1/2.2;
+static const float ZOOM = 2;
 
 // Whether to quit the program.
 static bool g_quit;
@@ -116,6 +123,11 @@ float intersect_with_prism_side(Ray const &ray,
     if (t > MIN_HIT_DIST) {
         // See if we're actually on side.
         p = ray.point_at(t);
+
+        // Prism is two high.
+        if (p.z() > 2) {
+            return -1;
+        }
 
         if (fabs(n.x()) > fabs(n.y())) {
             // Vertical side. Project to Y axis.
@@ -220,22 +232,51 @@ void render_image(float *image, int seed) {
     Vec3 p1(0, PRISM_WIDTH*sqrt(3)/2, 0);
     Vec3 p2(PRISM_WIDTH/2, 0, 0);
 
+    // Center prism at 0,0,0.
+    Vec3 offset(0, -p1.y()*0.4, 0);
+    p0 += offset;
+    p1 += offset;
+    p2 += offset;
+
     // 2D normals of prism, clockwise from left face.
     Vec3 n01 = get_2d_normal(p0, p1);
     Vec3 n12 = get_2d_normal(p1, p2);
     Vec3 n20 = get_2d_normal(p2, p0);
 
-    plot_point(image, p0);
-    plot_point(image, p1);
-    plot_point(image, p2);
+    /// plot_point(image, p0);
+    /// plot_point(image, p1);
+    /// plot_point(image, p2);
 
     while (!g_quit) {
         /// std::cout << "--------------------\n";
         // Random ray from light source, through slit.
-        Vec3 ray_origin = Vec3(-10, -4.1, 1);
-        Vec3 ray_target = Vec3(-0.6, my_rand()*0.001 - 0.1, my_rand());
+        Vec3 ray_origin(-10, -3.2, 1);
+        Vec3 ray_target(-0.6, my_rand()*0.002 - 0.05, my_rand());
         int wavelength = (int) (380 + (700 - 380)*my_rand());
         // ray_target = Vec3(-0.6, (wavelength - 380)/(700 - 380.0) - 0.5, my_rand());
+
+        /*
+        float xxx = my_rand()*2*M_PI;
+        ray_origin = Vec3(3*cos(xxx), 3*sin(xxx), 1);
+        ray_target = Vec3(0, 0, my_rand());
+
+        float yyy = ((p0 + p1 + p2)/3).y();
+        ray_origin = Vec3(30*cos(xxx), 30*sin(xxx) + yyy, 1);
+        ray_target = Vec3(0, yyy, my_rand());
+
+        float xxx2 = my_rand()*2*M_PI;
+        ray_target = Vec3(.5*cos(xxx2), .5*sin(xxx2) + yyy, my_rand());
+        */
+
+        ray_origin += offset;
+        ray_target += offset;
+
+        if (my_rand() < 0.1) {
+            Vec3 p_avg = (p0 + p1 + p2)/3;
+            ray_origin = p_avg + Vec3((my_rand() - 0.5)*0.1, (my_rand() - 0.5)*0.1, 10);
+            ray_target = p_avg + Vec3(my_rand() - 0.5, my_rand() - 0.5, 0);
+        }
+
         Ray ray(ray_origin, (ray_target - ray_origin).unit(), wavelength);
 
         bool done_with_ray = false;
@@ -307,6 +348,12 @@ void render_image(float *image, int seed) {
                             // Compute index of refraction for wavelength.
                             float B = 1.5046;
                             float C = 0.00420;
+
+                            // Widen rainbow, renormalize B.
+                            float new_C = C*10;
+                            B = B + C/(.540*.540) - new_C/(.540*.540);
+                            C = new_C;
+
                             float wl_um = ray.wavelength()/1000.0;
                             float refraction_index = B + C/(wl_um*wl_um);
 
@@ -319,7 +366,7 @@ void render_image(float *image, int seed) {
 
                 case 3: {
                             // Landed on paper, leave a spot.
-                            Vec3 p = (best_p + Vec3(0.5, 0.5, 0))*WIDTH;
+                            Vec3 p = (best_p*ZOOM + Vec3(0.5, HEIGHT/2.0/WIDTH, 0))*WIDTH;
 
                             int x = (int) (p.x() + 0.5);
                             int y = HEIGHT - 1 - (int) (p.y() + 0.5);
@@ -344,11 +391,39 @@ void render_image(float *image, int seed) {
     g_working--;
 }
 
+void save_image(float *image, int file_counter) {
+    // Convert from RGBA to RGB.
+    unsigned char *rgb_image = new unsigned char[PIXEL_COUNT*3];
+    unsigned char *rgb = rgb_image;
+    float *rgbf = image;
+    for (int i = 0; i < PIXEL_COUNT; i++) {
+        rgb[0] = (unsigned char) rgbf[0];
+        rgb[1] = (unsigned char) rgbf[1];
+        rgb[2] = (unsigned char) rgbf[2];
+
+        rgbf += 3;
+        rgb += 3;
+    }
+
+    // Write image.
+    std::ostringstream final_pathname;
+    final_pathname << "out" << "-" << std::setfill('0') <<
+        std::setw(3) << file_counter << ".png";
+
+    std::cout << "Saving to " << final_pathname.str() << "\n";
+    int success = stbi_write_png(final_pathname.str().c_str(),
+            WIDTH, HEIGHT, 3, rgb_image, WIDTH*3);
+    if (!success) {
+        std::cerr << "Cannot write output image.\n";
+    }
+}
+
 void render_frame() {
     float *image = new float[PIXEL_COUNT*3];
 
 #ifdef DISPLAY
     // For display.
+    float *image_norm = new float[PIXEL_COUNT*3];
     uint32_t *image32 = new uint32_t[PIXEL_COUNT];
 #endif
 
@@ -367,30 +442,65 @@ void render_frame() {
     }
 
 #ifdef DISPLAY
+    std::chrono::steady_clock::time_point start_time = std::chrono::steady_clock::now();
+    int file_counter = 1;
+
     while (g_working > 0) {
-        // Convert from float to 32-bit integer.
+        // Take log of color.
         float *rgbf = image;
+        float *rgbt = image_norm;
+        float max = 0;
         for (int i = 0; i < PIXEL_COUNT; i++) {
-            float gamma = 0.80;
+            rgbt[0] = log(rgbf[0] + 1);
+            rgbt[1] = log(rgbf[1] + 1);
+            rgbt[2] = log(rgbf[2] + 1);
+
+            max = std::max(std::max(std::max(max, rgbt[0]), rgbt[1]), rgbt[2]);
+
+            rgbf += 3;
+            rgbt += 3;
+        }
+
+        // Convert from float to 32-bit integer.
+        rgbf = image_norm;
+        for (int i = 0; i < PIXEL_COUNT; i++) {
             // Avoid negative base.
-            float red = rgbf[0] > 0 ? 255*pow(rgbf[0], gamma) : 0;
-            float green = rgbf[1] > 0 ? 255*pow(rgbf[1], gamma) : 0;
-            float blue = rgbf[2] > 0 ? 255*pow(rgbf[2], gamma) : 0; 
+            rgbf[0] = rgbf[0] > 0 ? 255*pow(rgbf[0]/max, GAMMA) : 0;
+            rgbf[1] = rgbf[1] > 0 ? 255*pow(rgbf[1]/max, GAMMA) : 0;
+            rgbf[2] = rgbf[2] > 0 ? 255*pow(rgbf[2]/max, GAMMA) : 0; 
 
             image32[i] = MFB_RGB(
-                    (unsigned char) red,
-                    (unsigned char) green,
-                    (unsigned char) blue);
+                    (unsigned char) rgbf[0],
+                    (unsigned char) rgbf[1],
+                    (unsigned char) rgbf[2]);
 
             rgbf += 3;
         }
 
+#ifdef UPDATE_DISPLAY
         int state = mfb_update(image32);
+#else
+        int state = 0;
+#endif
         if (state < 0) {
             // Tell workers to quit.
             g_quit = true;
         } else {
-            usleep(30*1000);
+#ifdef UPDATE_DISPLAY
+            usleep(300*1000);
+#else
+            usleep(300*1000*60);
+#endif
+
+            // Periodically save an image.
+            std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+            std::chrono::steady_clock::duration time_span = now - start_time;
+            double seconds = double(time_span.count())*std::chrono::steady_clock::period::num/
+                std::chrono::steady_clock::period::den;
+            if (seconds > 10 /*60*10*/) {
+                save_image(image_norm, file_counter++);
+                start_time = std::chrono::steady_clock::now();
+            }
         }
     }
 #endif
