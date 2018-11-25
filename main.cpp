@@ -300,6 +300,7 @@ void render_image(float *image, int seed) {
                 case 1:
                 case 2: {
                             // Compute index of refraction for wavelength.
+                            // https://en.wikipedia.org/wiki/Cauchy%27s_equation
                             float B = 1.5046;
                             float C = 0.00420;
 
