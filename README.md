@@ -2,6 +2,8 @@
 Forward ray-tracer to make an image a bit like the cover of
 the Pink Floyd album _Dark Side of the Moon_.
 
+![Program output](output.png)
+
 # Build
 
 Build the renderer using CMake:
@@ -12,6 +14,17 @@ Build the renderer using CMake:
     % make
 
 It compiles on MacOS and Linux.
+
+# Running
+
+Run the binary from the `build` directory:
+
+    % build/prism
+
+It will either bring up a UI (if on a Mac and the `UPDATE_DISPLAY`
+define is set in the code) or generate PNG file periodically. The
+whole program is hacked to generate a single image. Read the comments
+to figure out how to modify it.
 
 # License
 

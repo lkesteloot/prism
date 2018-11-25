@@ -7,8 +7,6 @@
 // Height of image depends on output image file size.
 // Prism is 2 units high (in positive Z direction).
 // Prism is 0.3 units wide at its base.
-// Prism's base is centered at 0,0.
-// Single light source at -10, -10, 1.
 
 #include <iostream>
 #include <sstream>
@@ -27,14 +25,18 @@
 
 #include "stb_image_write.h"
 
+// Define this to have a UI pop up with the image in progress (Mac only).
 #undef UPDATE_DISPLAY
 
+// Size of the output image. Divide by 5 for in-progress work.
 static const int WIDTH = 3300;
 static const int HEIGHT = 4200;
 static const int PIXEL_COUNT = WIDTH*HEIGHT;
 static const float PRISM_WIDTH = 0.3;
 static const float MIN_HIT_DIST = 0.001;
 static const float GAMMA = 1/2.2;
+
+// How much to zoom into the center of the image (to make the prism look larger).
 static const float ZOOM = 2;
 
 // Whether to quit the program.
@@ -46,61 +48,6 @@ static int g_thread_count;
 // How many worker threads are still working.
 static std::atomic_int g_working;
 
-/**
- * Given a wavelength in nanometers, returns RGB value between 0 and 1.
- *
- * From: https://www.johndcook.com/wavelength_to_RGB.html
- */
-void wavelength_to_rgb(int wavelength, float rgb[3]) {
-    float red, green, blue;
-
-    if (wavelength >= 380 && wavelength < 440) {
-        red   = -(wavelength - 440) / (440 - 380.);
-        green = 0.0;
-        blue  = 1.0;
-    } else if (wavelength >= 440 && wavelength < 490) {
-        red   = 0.0;
-        green = (wavelength - 440) / (490 - 440.);
-        blue  = 1.0;
-    } else if (wavelength >= 490 && wavelength < 510) {
-        red   = 0.0;
-        green = 1.0;
-        blue  = -(wavelength - 510) / (510 - 490.);
-    } else if (wavelength >= 510 && wavelength < 580) {
-        red   = (wavelength - 510) / (580 - 510.);
-        green = 1.0;
-        blue  = 0.0;
-    } else if (wavelength >= 580 && wavelength < 645) {
-        red   = 1.0;
-        green = -(wavelength - 645) / (645 - 580.);
-        blue  = 0.0;
-    } else if (wavelength >= 645 && wavelength < 781) {
-        red   = 1.0;
-        green = 0.0;
-        blue  = 0.0;
-    } else {
-        red   = 0.0;
-        green = 0.0;
-        blue  = 0.0;
-    }
-
-    // Let the intensity fall off near the vision limits.
-    float factor;
-    if (wavelength >= 380 && wavelength < 420) {
-        factor = 0.3 + 0.7*(wavelength - 380) / (420 - 380.);
-    } else if (wavelength >= 420 && wavelength < 701) {
-        factor = 1.0;
-    } else if (wavelength >= 701 && wavelength < 781) {
-        factor = 0.3 + 0.7*(780 - wavelength) / (780 - 700.);
-    } else {
-        factor = 0.0;
-    }
-
-    rgb[0] = red*factor;
-    rgb[1] = green*factor;
-    rgb[2] = blue*factor;
-}
-
 // Normalized 2D normal vector to two vertices.
 Vec3 get_2d_normal(Vec3 const &p1, Vec3 const &p2) {
     Vec3 v = p2 - p1;
@@ -108,20 +55,23 @@ Vec3 get_2d_normal(Vec3 const &p1, Vec3 const &p2) {
     return Vec3(-v.y(), v.x(), 0).unit();
 }
 
+// Return the distance along the ray to hit this side of the prism.
 float intersect_with_prism_side(Ray const &ray,
         Vec3 const &p1, Vec3 const &p2, Vec3 const &n) {
 
     Vec3 p = ray.origin() - p1;
 
+    // See if we're parallel to the side.
     float denom = ray.direction().dot(n);
     if (denom == 0) {
         return -1;
     }
 
+    // Distance to intersection.
     float t = -(p.dot(n)) / denom;
 
     if (t > MIN_HIT_DIST) {
-        // See if we're actually on side.
+        // See if we're within the rectangle.
         p = ray.point_at(t);
 
         // Prism is two high.
@@ -159,6 +109,7 @@ float intersect_with_prism_side(Ray const &ray,
     return t;
 }
 
+// Plot a single pixel. For debugging.
 void plot_point(float *image, Vec3 const &p) {
     Vec3 pi = (p + Vec3(0.5, 0.5, 0))*WIDTH;
 
@@ -181,6 +132,7 @@ static float schlick(float cosine, float refraction_index) {
     return r0 + (1 - r0)*pow(1 - cosine, 5);
 }
 
+// Get new ray from an intersection with glass.
 void hit_glass(Ray const &ray_in, Vec3 const &p, Vec3 const &n,
         float refraction_index, Ray &ray_out) {
 
@@ -223,6 +175,7 @@ void hit_glass(Ray const &ray_in, Vec3 const &p, Vec3 const &n,
     }
 }
 
+// Render into "image" with the specified random seed.
 void render_image(float *image, int seed) {
     // Initialize the seed for our thread.
     init_rand(seed);
@@ -243,12 +196,12 @@ void render_image(float *image, int seed) {
     Vec3 n12 = get_2d_normal(p1, p2);
     Vec3 n20 = get_2d_normal(p2, p0);
 
+    // Draw vertices of prism, for debugging.
     /// plot_point(image, p0);
     /// plot_point(image, p1);
     /// plot_point(image, p2);
 
     while (!g_quit) {
-        /// std::cout << "--------------------\n";
         // Random ray from light source, through slit.
         Vec3 ray_origin(-10, -3.2, 1);
         Vec3 ray_target(-0.6, my_rand()*0.002 - 0.05, my_rand());
@@ -271,6 +224,7 @@ void render_image(float *image, int seed) {
         ray_origin += offset;
         ray_target += offset;
 
+        // Occasionally send some light from above, to highlight the prism itself.
         if (my_rand() < 0.10) {
             Vec3 p_avg = (p0 + p1 + p2)/3;
             ray_origin = p_avg + Vec3((my_rand() - 0.5)*0.1, (my_rand() - 0.5)*0.1, 10);
@@ -372,13 +326,12 @@ void render_image(float *image, int seed) {
                             int y = HEIGHT - 1 - (int) (p.y() + 0.5);
 
                             if (x >= 0 && y >= 0 && x < WIDTH && y < HEIGHT) {
-                                float rgb[3];
-                                wavelength_to_rgb(ray.wavelength(), rgb);
+                                Vec3 rgb = wavelength2rgb(ray.wavelength());
 
                                 int i = (y*WIDTH + x)*3;
-                                image[i + 0] += rgb[0]*0.001;
-                                image[i + 1] += rgb[1]*0.001;
-                                image[i + 2] += rgb[2]*0.001;
+                                image[i + 0] += rgb.r()*0.001;
+                                image[i + 1] += rgb.g()*0.001;
+                                image[i + 2] += rgb.b()*0.001;
                             }
                             done_with_ray = true;
                             break;
@@ -391,6 +344,7 @@ void render_image(float *image, int seed) {
     g_working--;
 }
 
+// Same normalized image to disk.
 void save_image(float *image, int file_counter) {
     // Convert from RGBA to RGB.
     unsigned char *rgb_image = new unsigned char[PIXEL_COUNT*3];
@@ -418,6 +372,7 @@ void save_image(float *image, int file_counter) {
     }
 }
 
+// Render a single frame.
 void render_frame() {
 #ifdef DISPLAY
     // For display.

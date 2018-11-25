@@ -155,6 +155,8 @@ void init_rand(int seed);
 
 // Color functions.
 Vec3 hsv2rgb(const Vec3 &hsv);
+// Given a wavelength in nanometers, returns RGB value between 0 and 1.
+Vec3 wavelength2rgb(int wavelength);
 
 static Vec3 VEC3_BLACK = Vec3(0, 0, 0);
 static Vec3 VEC3_ORIGIN = Vec3(0, 0, 0);
