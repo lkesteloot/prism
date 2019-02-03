@@ -16,6 +16,7 @@
 #include <vector>
 #include <limits>
 #include <chrono>
+#include <atomic>
 #include <unistd.h>
 #include "Ray.h"
 
